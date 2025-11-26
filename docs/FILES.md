@@ -21,24 +21,24 @@ BosBase allows you to upload and manage files through file fields in your collec
 Before uploading files, you must add a file field to your collection:
 
 ```go
-collection, err := pb.Collections.GetOne("example", nil)
+collection, err := client.Collections.GetOne("example", nil)
 if err != nil {
     log.Fatal(err)
 }
 
 fields, _ := collection["fields"].([]interface{})
 newField := map[string]interface{}{
-    "name":      "documents",
-    "type":      "file",
+    "name":     "documents",
+    "type":     "file",
     "maxSelect": 5,        // Maximum number of files (1 for single file)
-    "maxSize":   5242880,  // 5MB in bytes (optional, default: 5MB)
+    "maxSize":  5242880,   // 5MB in bytes (optional, default: 5MB)
     "mimeTypes": []string{"image/jpeg", "image/png", "application/pdf"},
-    "thumbs":    []string{"100x100", "300x300"}, // Thumbnail sizes for images
-    "protected": false,    // Require token for access
+    "thumbs":   []string{"100x100", "300x300"}, // Thumbnail sizes for images
+    "protected": false,   // Require token for access
 }
 fields = append(fields, newField)
 
-_, err = pb.Collections.Update("example", &bosbase.CrudMutateOptions{
+_, err = client.Collections.Update("example", &bosbase.CrudMutateOptions{
     Body: map[string]interface{}{
         "fields": fields,
     },
@@ -57,37 +57,38 @@ package main
 import (
     "log"
     "os"
-    "github.com/your-org/bosbase-go-sdk"
+    
+    bosbase "github.com/bosbase/go-sdk"
 )
 
 func main() {
-    pb := bosbase.New("http://localhost:8090")
+    client := bosbase.New("http://localhost:8090")
+    defer client.Close()
     
     // Open file
-    file, err := os.Open("file1.txt")
+    file, err := os.Open("image.jpg")
     if err != nil {
         log.Fatal(err)
     }
     defer file.Close()
     
-    // Create record with file
-    record, err := pb.Collection("example").Create(&bosbase.CrudMutateOptions{
+    // Create record with file upload
+    record, err := client.Collection("example").Create(&bosbase.CrudMutateOptions{
         Body: map[string]interface{}{
             "title": "Hello world!",
         },
         Files: map[string]bosbase.FileParam{
             "documents": {
-                Filename:    "file1.txt",
+                Filename:    "image.jpg",
                 Reader:      file,
-                ContentType: "text/plain",
+                ContentType: "image/jpeg",
             },
         },
     })
     if err != nil {
         log.Fatal(err)
     }
-    
-    fmt.Println("Created record:", record)
+    log.Println("Created record:", record)
 }
 ```
 
@@ -95,16 +96,19 @@ func main() {
 
 ```go
 // Update record and upload new files
-file, _ := os.Open("file3.txt")
+file, err := os.Open("newfile.txt")
+if err != nil {
+    log.Fatal(err)
+}
 defer file.Close()
 
-record, err := pb.Collection("example").Update("RECORD_ID", &bosbase.CrudMutateOptions{
+_, err = client.Collection("example").Update("RECORD_ID", &bosbase.CrudMutateOptions{
     Body: map[string]interface{}{
         "title": "Updated title",
     },
     Files: map[string]bosbase.FileParam{
         "documents": {
-            Filename:    "file3.txt",
+            Filename:    "newfile.txt",
             Reader:      file,
             ContentType: "text/plain",
         },
@@ -118,12 +122,15 @@ For multiple file fields, use the `+` modifier to append files:
 
 ```go
 // Append files to existing ones
-file, _ := os.Open("file4.txt")
+file, err := os.Open("file4.txt")
+if err != nil {
+    log.Fatal(err)
+}
 defer file.Close()
 
-_, err := pb.Collection("example").Update("RECORD_ID", &bosbase.CrudMutateOptions{
+_, err = client.Collection("example").Update("RECORD_ID", &bosbase.CrudMutateOptions{
     Body: map[string]interface{}{
-        "documents+": "file4.txt", // Note: In Go SDK, you still use Files map
+        "documents+": "file4.txt", // Note: In Go SDK, file operations use Files map
     },
     Files: map[string]bosbase.FileParam{
         "documents+": {
@@ -135,13 +142,45 @@ _, err := pb.Collection("example").Update("RECORD_ID", &bosbase.CrudMutateOption
 })
 ```
 
+### Upload Multiple Files
+
+```go
+files := []struct {
+    path        string
+    contentType string
+}{
+    {"file1.txt", "text/plain"},
+    {"file2.pdf", "application/pdf"},
+    {"file3.jpg", "image/jpeg"},
+}
+
+fileParams := make(map[string]bosbase.FileParam)
+for i, f := range files {
+    file, err := os.Open(f.path)
+    if err != nil {
+        log.Fatal(err)
+    }
+    defer file.Close()
+    
+    fileParams[fmt.Sprintf("documents+")] = bosbase.FileParam{
+        Filename:    filepath.Base(f.path),
+        Reader:      file,
+        ContentType: f.contentType,
+    }
+}
+
+_, err = client.Collection("example").Update("RECORD_ID", &bosbase.CrudMutateOptions{
+    Files: fileParams,
+})
+```
+
 ## Deleting Files
 
 ### Delete All Files
 
 ```go
 // Delete all files in a field (set to empty array)
-_, err := pb.Collection("example").Update("RECORD_ID", &bosbase.CrudMutateOptions{
+_, err := client.Collection("example").Update("RECORD_ID", &bosbase.CrudMutateOptions{
     Body: map[string]interface{}{
         "documents": []string{},
     },
@@ -152,7 +191,7 @@ _, err := pb.Collection("example").Update("RECORD_ID", &bosbase.CrudMutateOption
 
 ```go
 // Delete individual files by filename
-_, err := pb.Collection("example").Update("RECORD_ID", &bosbase.CrudMutateOptions{
+_, err := client.Collection("example").Update("RECORD_ID", &bosbase.CrudMutateOptions{
     Body: map[string]interface{}{
         "documents-": []string{"file1.pdf", "file2.txt"},
     },
@@ -172,19 +211,21 @@ http://localhost:8090/api/files/COLLECTION_ID_OR_NAME/RECORD_ID/FILENAME
 **Using SDK:**
 
 ```go
-record, err := pb.Collection("example").GetOne("RECORD_ID", nil)
+record, err := client.Collection("example").GetOne("RECORD_ID", nil)
 if err != nil {
     log.Fatal(err)
 }
 
 // Single file field (returns string)
-filename := record["documents"].(string)
-url := pb.Files.GetURL(record, filename, nil)
+filename, _ := record["documents"].(string)
+url := client.Files.GetURL(record, filename, nil)
 
 // Multiple file field (returns array)
-if files, ok := record["documents"].([]interface{}); ok {
-    firstFile := files[0].(string)
-    url := pb.Files.GetURL(record, firstFile, nil)
+filenames, _ := record["documents"].([]interface{})
+if len(filenames) > 0 {
+    firstFile, _ := filenames[0].(string)
+    url := client.Files.GetURL(record, firstFile, nil)
+    fmt.Println("File URL:", url)
 }
 ```
 
@@ -193,15 +234,15 @@ if files, ok := record["documents"].([]interface{}); ok {
 If your file field has thumbnail sizes configured, you can request thumbnails:
 
 ```go
-record, err := pb.Collection("example").GetOne("RECORD_ID", nil)
+record, err := client.Collection("example").GetOne("RECORD_ID", nil)
 if err != nil {
     log.Fatal(err)
 }
 
-filename := record["avatar"].(string) // Image file
+filename, _ := record["avatar"].(string) // Image file
 
 // Get thumbnail with specific size
-thumbUrl := pb.Files.GetURL(record, filename, &bosbase.FileURLOptions{
+thumbUrl := client.Files.GetURL(record, filename, &bosbase.FileURLOptions{
     Thumb: "100x300", // Width x Height
 })
 ```
@@ -224,21 +265,21 @@ thumbUrl := pb.Files.GetURL(record, filename, &bosbase.FileURLOptions{
 **Example:**
 
 ```go
-record, err := pb.Collection("products").GetOne("PRODUCT_ID", nil)
+record, err := client.Collection("products").GetOne("PRODUCT_ID", nil)
 if err != nil {
     log.Fatal(err)
 }
 
-image := record["image"].(string)
+image, _ := record["image"].(string)
 
 // Different thumbnail sizes
-thumbSmall := pb.Files.GetURL(record, image, &bosbase.FileURLOptions{
+thumbSmall := client.Files.GetURL(record, image, &bosbase.FileURLOptions{
     Thumb: "100x100",
 })
-thumbMedium := pb.Files.GetURL(record, image, &bosbase.FileURLOptions{
+thumbMedium := client.Files.GetURL(record, image, &bosbase.FileURLOptions{
     Thumb: "300x300f",
 })
-thumbLarge := pb.Files.GetURL(record, image, &bosbase.FileURLOptions{
+thumbLarge := client.Files.GetURL(record, image, &bosbase.FileURLOptions{
     Thumb: "800x600",
 })
 ```
@@ -248,7 +289,7 @@ thumbLarge := pb.Files.GetURL(record, image, &bosbase.FileURLOptions{
 To force browser download instead of preview:
 
 ```go
-url := pb.Files.GetURL(record, filename, &bosbase.FileURLOptions{
+url := client.Files.GetURL(record, filename, &bosbase.FileURLOptions{
     Download: true, // Force download
 })
 ```
@@ -260,22 +301,22 @@ By default, all files are publicly accessible if you know the full URL. For sens
 ### Setting Up Protected Files
 
 ```go
-collection, err := pb.Collections.GetOne("example", nil)
+collection, err := client.Collections.GetOne("example", nil)
 if err != nil {
     log.Fatal(err)
 }
 
 fields, _ := collection["fields"].([]interface{})
-for _, f := range fields {
-    if field, ok := f.(map[string]interface{}); ok {
-        if name, _ := field["name"].(string); name == "documents" {
-            field["protected"] = true
-            break
+for i, field := range fields {
+    if f, ok := field.(map[string]interface{}); ok {
+        if name, _ := f["name"].(string); name == "documents" {
+            f["protected"] = true
+            fields[i] = f
         }
     }
 }
 
-_, err = pb.Collections.Update("example", &bosbase.CrudMutateOptions{
+_, err = client.Collections.Update("example", &bosbase.CrudMutateOptions{
     Body: map[string]interface{}{
         "fields": fields,
     },
@@ -288,29 +329,30 @@ Protected files require authentication and a file token:
 
 ```go
 // Step 1: Authenticate
-_, err := pb.Collection("users").AuthWithPassword("user@example.com", "password123", "", "", nil, nil, nil)
+_, err := client.Collection("users").AuthWithPassword(
+    "user@example.com", "password123", "", "", nil, nil, nil)
 if err != nil {
     log.Fatal(err)
 }
 
 // Step 2: Get file token (valid for ~2 minutes)
-fileToken, err := pb.Files.GetToken(nil, nil, nil)
+fileToken, err := client.Files.GetToken(nil, nil, nil)
 if err != nil {
     log.Fatal(err)
 }
 
 // Step 3: Get protected file URL with token
-record, err := pb.Collection("example").GetOne("RECORD_ID", nil)
+record, err := client.Collection("example").GetOne("RECORD_ID", nil)
 if err != nil {
     log.Fatal(err)
 }
 
-filename := record["privateDocument"].(string)
-url := pb.Files.GetURL(record, filename, &bosbase.FileURLOptions{
+filename, _ := record["privateDocument"].(string)
+url := client.Files.GetURL(record, filename, &bosbase.FileURLOptions{
     Token: fileToken,
 })
 
-fmt.Println("File URL:", url)
+fmt.Println("Protected file URL:", url)
 ```
 
 **Important:**
@@ -321,28 +363,28 @@ fmt.Println("File URL:", url)
 ### Complete Protected File Example
 
 ```go
-func loadProtectedImage(pb *bosbase.BosBase, recordID, filename string) (string, error) {
+func loadProtectedImage(client *bosbase.BosBase, recordID, filename string) (string, error) {
     // Check if authenticated
-    if !pb.AuthStore.IsValid() {
+    if !client.AuthStore.IsValid() {
         return "", fmt.Errorf("not authenticated")
     }
-
+    
     // Get fresh token
-    token, err := pb.Files.GetToken(nil, nil, nil)
+    token, err := client.Files.GetToken(nil, nil, nil)
     if err != nil {
         return "", err
     }
-
+    
     // Get file URL
-    record, err := pb.Collection("example").GetOne(recordID, nil)
+    record, err := client.Collection("documents").GetOne(recordID, nil)
     if err != nil {
         return "", err
     }
-
-    url := pb.Files.GetURL(record, filename, &bosbase.FileURLOptions{
+    
+    url := client.Files.GetURL(record, filename, &bosbase.FileURLOptions{
         Token: token,
     })
-
+    
     return url, nil
 }
 ```
@@ -355,40 +397,49 @@ func loadProtectedImage(pb *bosbase.BosBase, recordID, filename string) (string,
 package main
 
 import (
+    "fmt"
     "log"
     "os"
-    "github.com/your-org/bosbase-go-sdk"
+    
+    bosbase "github.com/bosbase/go-sdk"
 )
 
 func main() {
-    pb := bosbase.New("http://localhost:8090")
-    _, err := pb.Admins.AuthWithPassword("admin@example.com", "password", "", "", nil, nil, nil)
+    client := bosbase.New("http://localhost:8090")
+    defer client.Close()
+    
+    // Authenticate as admin
+    _, err := client.Collection("_superusers").AuthWithPassword(
+        "admin@example.com", "password", "", "", nil, nil, nil)
     if err != nil {
         log.Fatal(err)
     }
-
+    
     // Create collection with image field and thumbnails
-    collection, err := pb.Collections.CreateBase("products", map[string]interface{}{
+    _, err = client.Collections.CreateBase("products", map[string]interface{}{
         "fields": []map[string]interface{}{
             {"name": "name", "type": "text", "required": true},
             {
-                "name":      "image",
-                "type":      "file",
+                "name":     "image",
+                "type":     "file",
                 "maxSelect": 1,
                 "mimeTypes": []string{"image/jpeg", "image/png"},
-                "thumbs":    []string{"100x100", "300x300", "800x600f"},
+                "thumbs":   []string{"100x100", "300x300", "800x600f"}, // Thumbnail sizes
             },
         },
     }, nil, nil, nil)
     if err != nil {
         log.Fatal(err)
     }
-
+    
     // Upload product with image
-    file, _ := os.Open("product.jpg")
+    file, err := os.Open("product.jpg")
+    if err != nil {
+        log.Fatal(err)
+    }
     defer file.Close()
-
-    product, err := pb.Collection("products").Create(&bosbase.CrudMutateOptions{
+    
+    product, err := client.Collection("products").Create(&bosbase.CrudMutateOptions{
         Body: map[string]interface{}{
             "name": "My Product",
         },
@@ -403,12 +454,13 @@ func main() {
     if err != nil {
         log.Fatal(err)
     }
-
-    // Display thumbnail
-    filename := product["image"].(string)
-    thumbnailUrl := pb.Files.GetURL(product, filename, &bosbase.FileURLOptions{
+    
+    // Display thumbnail in UI
+    image, _ := product["image"].(string)
+    thumbnailUrl := client.Files.GetURL(product, image, &bosbase.FileURLOptions{
         Thumb: "300x300",
     })
+    
     fmt.Println("Thumbnail URL:", thumbnailUrl)
 }
 ```
@@ -416,28 +468,30 @@ func main() {
 ### Example 2: Multiple File Upload
 
 ```go
-func uploadMultipleFiles(pb *bosbase.BosBase, files []string) error {
+func uploadMultipleFiles(client *bosbase.BosBase, collectionID, recordID string, filePaths []string) error {
     fileParams := make(map[string]bosbase.FileParam)
     
-    for i, filepath := range files {
-        file, err := os.Open(filepath)
+    for _, path := range filePaths {
+        file, err := os.Open(path)
         if err != nil {
             return err
         }
         defer file.Close()
         
-        filename := filepath[strings.LastIndex(filepath, "/")+1:]
-        fileParams[fmt.Sprintf("documents_%d", i)] = bosbase.FileParam{
+        filename := filepath.Base(path)
+        contentType := mime.TypeByExtension(filepath.Ext(path))
+        if contentType == "" {
+            contentType = "application/octet-stream"
+        }
+        
+        fileParams["documents+"] = bosbase.FileParam{
             Filename:    filename,
             Reader:      file,
-            ContentType: "application/octet-stream",
+            ContentType: contentType,
         }
     }
     
-    _, err := pb.Collection("example").Create(&bosbase.CrudMutateOptions{
-        Body: map[string]interface{}{
-            "title": "Document Set",
-        },
+    _, err := client.Collection(collectionID).Update(recordID, &bosbase.CrudMutateOptions{
         Files: fileParams,
     })
     
@@ -449,57 +503,60 @@ func uploadMultipleFiles(pb *bosbase.BosBase, files []string) error {
 
 ```go
 type FileManager struct {
-    pb          *bosbase.BosBase
-    collectionID string
-    recordID     string
-    record       map[string]interface{}
+    client     *bosbase.BosBase
+    collection string
+    recordID   string
 }
 
-func (fm *FileManager) Load() error {
-    record, err := fm.pb.Collection(fm.collectionID).GetOne(fm.recordID, nil)
-    if err != nil {
-        return err
-    }
-    fm.record = record
-    return nil
+func (fm *FileManager) Load() (map[string]interface{}, error) {
+    return fm.client.Collection(fm.collection).GetOne(fm.recordID, nil)
 }
 
 func (fm *FileManager) DeleteFile(filename string) error {
-    _, err := fm.pb.Collection(fm.collectionID).Update(fm.recordID, &bosbase.CrudMutateOptions{
+    _, err := fm.client.Collection(fm.collection).Update(fm.recordID, &bosbase.CrudMutateOptions{
         Body: map[string]interface{}{
             "documents-": []string{filename},
         },
     })
-    if err != nil {
-        return err
-    }
-    return fm.Load() // Reload
+    return err
 }
 
-func (fm *FileManager) AddFile(filepath string) error {
-    file, err := os.Open(filepath)
-    if err != nil {
-        return err
-    }
-    defer file.Close()
+func (fm *FileManager) AddFiles(filePaths []string) error {
+    fileParams := make(map[string]bosbase.FileParam)
     
-    filename := filepath[strings.LastIndex(filepath, "/")+1:]
-    _, err = fm.pb.Collection(fm.collectionID).Update(fm.recordID, &bosbase.CrudMutateOptions{
-        Body: map[string]interface{}{
-            "documents+": filename,
-        },
-        Files: map[string]bosbase.FileParam{
-            "documents+": {
-                Filename:    filename,
-                Reader:      file,
-                ContentType: "application/octet-stream",
-            },
-        },
-    })
-    if err != nil {
-        return err
+    for _, path := range filePaths {
+        file, err := os.Open(path)
+        if err != nil {
+            return err
+        }
+        defer file.Close()
+        
+        fileParams["documents+"] = bosbase.FileParam{
+            Filename:    filepath.Base(path),
+            Reader:      file,
+            ContentType: mime.TypeByExtension(filepath.Ext(path)),
+        }
     }
-    return fm.Load() // Reload
+    
+    _, err := fm.client.Collection(fm.collection).Update(fm.recordID, &bosbase.CrudMutateOptions{
+        Files: fileParams,
+    })
+    return err
+}
+
+// Usage
+manager := &FileManager{
+    client:     client,
+    collection: "example",
+    recordID:   "RECORD_ID",
+}
+
+record, _ := manager.Load()
+fmt.Println("Files:", record["documents"])
+
+err := manager.AddFiles([]string{"file1.txt", "file2.pdf"})
+if err != nil {
+    log.Fatal(err)
 }
 ```
 
@@ -507,10 +564,9 @@ func (fm *FileManager) AddFile(filepath string) error {
 
 ### Summary
 
-- **No modifier** - Replace all files: `documents: [file1, file2]`
-- **`+` suffix** - Append files: `documents+: file3`
-- **`+` prefix** - Prepend files: `+documents: file0`
-- **`-` suffix** - Delete files: `documents-: ['file1.pdf']`
+- **No modifier** - Replace all files: `documents: []string{}`
+- **`+` suffix** - Append files: Use `Files` map with `"documents+"` key
+- **`-` suffix** - Delete files: `documents-: []string{"file1.pdf"}`
 
 ## Best Practices
 
@@ -525,20 +581,14 @@ func (fm *FileManager) AddFile(filepath string) error {
 ## Error Handling
 
 ```go
-file, err := os.Open("test.txt")
-if err != nil {
-    log.Fatal(err)
-}
-defer file.Close()
-
-_, err = pb.Collection("example").Create(&bosbase.CrudMutateOptions{
+record, err := client.Collection("example").Create(&bosbase.CrudMutateOptions{
     Body: map[string]interface{}{
         "title": "Test",
     },
     Files: map[string]bosbase.FileParam{
         "documents": {
             Filename:    "test.txt",
-            Reader:      file,
+            Reader:      strings.NewReader("content"),
             ContentType: "text/plain",
         },
     },
@@ -553,10 +603,10 @@ if err != nil {
         case 403:
             fmt.Println("Insufficient permissions")
         default:
-            fmt.Println("Upload failed:", err)
+            fmt.Printf("Upload failed: %v\n", err)
         }
     } else {
-        fmt.Println("Upload failed:", err)
+        fmt.Printf("Upload failed: %v\n", err)
     }
 }
 ```
@@ -572,4 +622,5 @@ This is configured server-side and doesn't require SDK changes.
 
 - [Collections](./COLLECTIONS.md) - Collection and field configuration
 - [Authentication](./AUTHENTICATION.md) - Required for protected files
+- [File API](./FILE_API.md) - File download and URL generation
 

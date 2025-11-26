@@ -34,14 +34,16 @@ package main
 import (
     "fmt"
     "log"
-    "github.com/your-org/bosbase-go-sdk"
+    
+    bosbase "github.com/bosbase/go-sdk"
 )
 
 func main() {
-    pb := bosbase.New("http://127.0.0.1:8090")
+    client := bosbase.New("http://127.0.0.1:8090")
+    defer client.Close()
     
     // Basic list with pagination
-    result, err := pb.Collection("posts").GetList(&bosbase.CrudListOptions{
+    result, err := client.Collection("posts").GetList(&bosbase.CrudListOptions{
         Page:    1,
         PerPage: 50,
     })
@@ -49,13 +51,15 @@ func main() {
         log.Fatal(err)
     }
     
-    fmt.Println("Page:", result["page"])
-    fmt.Println("Per Page:", result["perPage"])
-    fmt.Println("Total Items:", result["totalItems"])
-    fmt.Println("Total Pages:", result["totalPages"])
-    if items, ok := result["items"].([]interface{}); ok {
-        fmt.Println("Items:", len(items))
-    }
+    page, _ := result["page"].(float64)
+    perPage, _ := result["perPage"].(float64)
+    totalItems, _ := result["totalItems"].(float64)
+    totalPages, _ := result["totalPages"].(float64)
+    items, _ := result["items"].([]interface{})
+    
+    fmt.Printf("Page: %.0f, PerPage: %.0f, TotalItems: %.0f, TotalPages: %.0f\n",
+        page, perPage, totalItems, totalPages)
+    fmt.Printf("Items: %d\n", len(items))
 }
 ```
 
@@ -63,7 +67,7 @@ func main() {
 
 ```go
 // Filter and sort
-result, err := pb.Collection("posts").GetList(&bosbase.CrudListOptions{
+result, err := client.Collection("posts").GetList(&bosbase.CrudListOptions{
     Page:    1,
     PerPage: 50,
     Filter:  `created >= "2022-01-01 00:00:00" && status = "published"`,
@@ -72,7 +76,7 @@ result, err := pb.Collection("posts").GetList(&bosbase.CrudListOptions{
 })
 
 // Filter with operators
-result2, err := pb.Collection("posts").GetList(&bosbase.CrudListOptions{
+result2, err := client.Collection("posts").GetList(&bosbase.CrudListOptions{
     Page:    1,
     PerPage: 50,
     Filter:  `title ~ "javascript" && views > 100`,
@@ -86,14 +90,15 @@ Fetch all records at once (useful for small collections):
 
 ```go
 // Get all records
-allPosts, err := pb.Collection("posts").GetFullList(200, &bosbase.CrudListOptions{
+allPosts, err := client.Collection("posts").GetFullList(500, &bosbase.CrudListOptions{
     Sort:   "-created",
     Filter: `status = "published"`,
 })
-if err != nil {
-    log.Fatal(err)
-}
-fmt.Printf("Retrieved %d posts\n", len(allPosts))
+
+// With batch size for large collections
+allPosts, err := client.Collection("posts").GetFullList(200, &bosbase.CrudListOptions{
+    Sort: "-created",
+})
 ```
 
 #### Get First Matching Record
@@ -101,15 +106,12 @@ fmt.Printf("Retrieved %d posts\n", len(allPosts))
 Get only the first record that matches a filter:
 
 ```go
-post, err := pb.Collection("posts").GetFirstListItem(
+post, err := client.Collection("posts").GetFirstListItem(
     `slug = "my-post-slug"`,
     &bosbase.CrudViewOptions{
         Expand: "author,categories.tags",
     },
 )
-if err != nil {
-    log.Fatal(err)
-}
 ```
 
 ### View Record
@@ -118,20 +120,20 @@ Retrieve a single record by ID:
 
 ```go
 // Basic retrieval
-record, err := pb.Collection("posts").GetOne("RECORD_ID", nil)
+record, err := client.Collection("posts").GetOne("RECORD_ID", nil)
 
 // With expanded relations
-record, err := pb.Collection("posts").GetOne("RECORD_ID", &bosbase.CrudViewOptions{
+record, err := client.Collection("posts").GetOne("RECORD_ID", &bosbase.CrudViewOptions{
     Expand: "author,categories,tags",
 })
 
 // Nested expand
-record, err := pb.Collection("comments").GetOne("COMMENT_ID", &bosbase.CrudViewOptions{
+record, err := client.Collection("comments").GetOne("COMMENT_ID", &bosbase.CrudViewOptions{
     Expand: "post.author,user",
 })
 
 // Field selection
-record, err := pb.Collection("posts").GetOne("RECORD_ID", &bosbase.CrudViewOptions{
+record, err := client.Collection("posts").GetOne("RECORD_ID", &bosbase.CrudViewOptions{
     Fields: "id,title,content,author.name",
 })
 ```
@@ -142,7 +144,7 @@ Create a new record:
 
 ```go
 // Simple create
-record, err := pb.Collection("posts").Create(&bosbase.CrudMutateOptions{
+record, err := client.Collection("posts").Create(&bosbase.CrudMutateOptions{
     Body: map[string]interface{}{
         "title":   "My First Post",
         "content": "Lorem ipsum...",
@@ -151,19 +153,26 @@ record, err := pb.Collection("posts").Create(&bosbase.CrudMutateOptions{
 })
 
 // Create with relations
-record, err := pb.Collection("posts").Create(&bosbase.CrudMutateOptions{
+record, err := client.Collection("posts").Create(&bosbase.CrudMutateOptions{
     Body: map[string]interface{}{
         "title":      "My Post",
-        "author":     "AUTHOR_ID",              // Single relation
-        "categories": []string{"cat1", "cat2"},   // Multiple relation
+        "author":     "AUTHOR_ID",           // Single relation
+        "categories": []string{"cat1", "cat2"}, // Multiple relation
     },
 })
 
 // Create with file upload
-file, _ := os.Open("image.jpg")
+import (
+    "os"
+)
+
+file, err := os.Open("image.jpg")
+if err != nil {
+    log.Fatal(err)
+}
 defer file.Close()
 
-record, err := pb.Collection("posts").Create(&bosbase.CrudMutateOptions{
+record, err := client.Collection("posts").Create(&bosbase.CrudMutateOptions{
     Body: map[string]interface{}{
         "title": "My Post",
     },
@@ -177,7 +186,7 @@ record, err := pb.Collection("posts").Create(&bosbase.CrudMutateOptions{
 })
 
 // Create with expand to get related data immediately
-record, err := pb.Collection("posts").Create(&bosbase.CrudMutateOptions{
+record, err := client.Collection("posts").Create(&bosbase.CrudMutateOptions{
     Body: map[string]interface{}{
         "title":  "My Post",
         "author": "AUTHOR_ID",
@@ -192,32 +201,35 @@ Update an existing record:
 
 ```go
 // Simple update
-record, err := pb.Collection("posts").Update("RECORD_ID", &bosbase.CrudMutateOptions{
+record, err := client.Collection("posts").Update("RECORD_ID", &bosbase.CrudMutateOptions{
     Body: map[string]interface{}{
         "title":  "Updated Title",
         "status": "published",
     },
 })
 
-// Update with relations (using field modifiers)
-record, err := pb.Collection("posts").Update("RECORD_ID", &bosbase.CrudMutateOptions{
+// Update with relations
+_, err = client.Collection("posts").Update("RECORD_ID", &bosbase.CrudMutateOptions{
     Body: map[string]interface{}{
         "categories+": "NEW_CATEGORY_ID", // Append
-        "tags-":       "OLD_TAG_ID",       // Remove
+        "tags-":      "OLD_TAG_ID",      // Remove
     },
 })
 
 // Update with file upload
-file, _ := os.Open("new_image.jpg")
+file, err := os.Open("newimage.jpg")
+if err != nil {
+    log.Fatal(err)
+}
 defer file.Close()
 
-record, err := pb.Collection("posts").Update("RECORD_ID", &bosbase.CrudMutateOptions{
+record, err := client.Collection("posts").Update("RECORD_ID", &bosbase.CrudMutateOptions{
     Body: map[string]interface{}{
         "title": "Updated Title",
     },
     Files: map[string]bosbase.FileParam{
         "image": {
-            Filename:    "new_image.jpg",
+            Filename:    "newimage.jpg",
             Reader:      file,
             ContentType: "image/jpeg",
         },
@@ -225,7 +237,7 @@ record, err := pb.Collection("posts").Update("RECORD_ID", &bosbase.CrudMutateOpt
 })
 
 // Update with expand
-record, err := pb.Collection("posts").Update("RECORD_ID", &bosbase.CrudMutateOptions{
+record, err := client.Collection("posts").Update("RECORD_ID", &bosbase.CrudMutateOptions{
     Body: map[string]interface{}{
         "title": "Updated",
     },
@@ -239,7 +251,7 @@ Delete a record:
 
 ```go
 // Simple delete
-err := pb.Collection("posts").Delete("RECORD_ID", nil)
+err := client.Collection("posts").Delete("RECORD_ID", nil)
 if err != nil {
     log.Fatal(err)
 }
@@ -256,56 +268,56 @@ The filter parameter supports a powerful query syntax:
 
 ```go
 // Equal
-filter := `status = "published"`
+filter: `status = "published"`
 
 // Not equal
-filter := `status != "draft"`
+filter: `status != "draft"`
 
 // Greater than / Less than
-filter := `views > 100`
-filter := `created < "2023-01-01"`
+filter: `views > 100`
+filter: `created < "2023-01-01"`
 
 // Greater/Less than or equal
-filter := `age >= 18`
-filter := `price <= 99.99`
+filter: `age >= 18`
+filter: `price <= 99.99`
 ```
 
 ### String Operators
 
 ```go
 // Contains (like)
-filter := `title ~ "javascript"`
+filter: `title ~ "javascript"`
 // Equivalent to: title LIKE "%javascript%"
 
 // Not contains
-filter := `title !~ "deprecated"`
+filter: `title !~ "deprecated"`
 
 // Exact match (case-sensitive)
-filter := `email = "user@example.com"`
+filter: `email = "user@example.com"`
 ```
 
 ### Array Operators (for multiple relations/files)
 
 ```go
 // Any of / At least one
-filter := `tags.id ?= "TAG_ID"`         // Any tag matches
-filter := `tags.name ?~ "important"`     // Any tag name contains "important"
+filter: `tags.id ?= "TAG_ID"`         // Any tag matches
+filter: `tags.name ?~ "important"`    // Any tag name contains "important"
 
 // All must match
-filter := `tags.id = "TAG_ID" && tags.id = "TAG_ID2"`
+filter: `tags.id = "TAG_ID" && tags.id = "TAG_ID2"`
 ```
 
 ### Logical Operators
 
 ```go
 // AND
-filter := `status = "published" && views > 100`
+filter: `status = "published" && views > 100`
 
 // OR
-filter := `status = "published" || status = "featured"`
+filter: `status = "published" || status = "featured"`
 
 // Parentheses for grouping
-filter := `(status = "published" || featured = true) && views > 50`
+filter: `(status = "published" || featured = true) && views > 50`
 ```
 
 ### Special Identifiers
@@ -315,17 +327,17 @@ filter := `(status = "published" || featured = true) && views > 50`
 // @request.auth.id, @request.query.*, etc.
 
 // Collection joins
-filter := `@collection.users.email = "test@example.com"`
+filter: `@collection.users.email = "test@example.com"`
 
 // Record fields
-filter := `author.id = @request.auth.id`
+filter: `author.id = @request.auth.id`
 ```
 
 ### Comments
 
 ```go
 // Single-line comments are supported
-filter := `status = "published" // Only published posts`
+filter: `status = "published" // Only published posts`
 ```
 
 ## Sorting
@@ -334,22 +346,22 @@ Sort records using the `sort` parameter:
 
 ```go
 // Single field (ASC)
-sort := "created"
+sort: "created"
 
 // Single field (DESC)
-sort := "-created"
+sort: "-created"
 
 // Multiple fields
-sort := "-created,title"  // DESC by created, then ASC by title
+sort: "-created,title" // DESC by created, then ASC by title
 
 // Supported fields
-sort := "@random"         // Random order
-sort := "@rowid"          // Internal row ID
-sort := "id"              // Record ID
-sort := "fieldName"       // Any collection field
+sort: "@random"         // Random order
+sort: "@rowid"          // Internal row ID
+sort: "id"              // Record ID
+sort: "fieldName"       // Any collection field
 
 // Relation field sorting
-sort := "author.name"     // Sort by related author's name
+sort: "author.name"     // Sort by related author's name
 ```
 
 ## Field Selection
@@ -358,20 +370,20 @@ Control which fields are returned:
 
 ```go
 // Specific fields
-fields := "id,title,content"
+fields: "id,title,content"
 
 // All fields at level
-fields := "*"
+fields: "*"
 
 // Nested field selection
-fields := "*,author.name,author.email"
+fields: "*,author.name,author.email"
 
 // Excerpt modifier for text fields
-fields := "*,content:excerpt(200,true)"
+fields: "*,content:excerpt(200,true)"
 // Returns first 200 characters with ellipsis if truncated
 
 // Combined
-fields := "*,content:excerpt(200),author.name,author.email"
+fields: "*,content:excerpt(200),author.name,author.email"
 ```
 
 ## Expanding Relations
@@ -380,16 +392,16 @@ Expand related records without additional API calls:
 
 ```go
 // Single relation
-expand := "author"
+expand: "author"
 
 // Multiple relations
-expand := "author,categories,tags"
+expand: "author,categories,tags"
 
 // Nested relations (up to 6 levels)
-expand := "author.profile,categories.tags"
+expand: "author.profile,categories.tags"
 
 // Back-relations
-expand := "comments_via_post.user"
+expand: "comments_via_post.user"
 ```
 
 See [Relations Documentation](./RELATIONS.md) for detailed information.
@@ -398,7 +410,7 @@ See [Relations Documentation](./RELATIONS.md) for detailed information.
 
 ```go
 // Skip total count (faster queries)
-result, err := pb.Collection("posts").GetList(&bosbase.CrudListOptions{
+result, err := client.Collection("posts").GetList(&bosbase.CrudListOptions{
     Page:      1,
     PerPage:   50,
     SkipTotal: true, // totalItems and totalPages will be -1
@@ -406,7 +418,7 @@ result, err := pb.Collection("posts").GetList(&bosbase.CrudListOptions{
 })
 
 // Get Full List with batch processing
-allPosts, err := pb.Collection("posts").GetFullList(200, &bosbase.CrudListOptions{
+allPosts, err := client.Collection("posts").GetFullList(200, &bosbase.CrudListOptions{
     Sort: "-created",
 })
 // Processes in batches of 200 to avoid memory issues
@@ -418,7 +430,7 @@ Execute multiple operations in a single transaction:
 
 ```go
 // Create a batch
-batch := pb.CreateBatch()
+batch := client.CreateBatch()
 
 // Add operations
 batch.Collection("posts").Create(map[string]interface{}{
@@ -468,7 +480,7 @@ for i, result := range results {
 Get available authentication methods for a collection:
 
 ```go
-methods, err := pb.Collection("users").ListAuthMethods("", nil, nil)
+methods, err := client.Collection("users").ListAuthMethods("", nil, nil)
 if err != nil {
     log.Fatal(err)
 }
@@ -478,33 +490,36 @@ oauth2, _ := methods["oauth2"].(map[string]interface{})
 otp, _ := methods["otp"].(map[string]interface{})
 mfa, _ := methods["mfa"].(map[string]interface{})
 
-fmt.Println("Password enabled:", password["enabled"])
-fmt.Println("OAuth2 enabled:", oauth2["enabled"])
-fmt.Println("OTP enabled:", otp["enabled"])
-fmt.Println("MFA enabled:", mfa["enabled"])
+fmt.Printf("Password enabled: %v\n", password["enabled"])
+fmt.Printf("OAuth2 enabled: %v\n", oauth2["enabled"])
 ```
 
 ### Auth with Password
 
 ```go
-authData, err := pb.Collection("users").AuthWithPassword(
+authData, err := client.Collection("users").AuthWithPassword(
     "user@example.com", // username or email
     "password123",
-    "", "", nil, nil, nil,
+    "", // expand
+    "", // fields
+    nil, // body
+    nil, // query
+    nil, // headers
 )
 if err != nil {
     log.Fatal(err)
 }
 
-// Auth data is automatically stored in pb.AuthStore
-fmt.Println("Is Valid:", pb.AuthStore.IsValid())
-fmt.Println("Token:", pb.AuthStore.Token())
-if record := pb.AuthStore.Record(); record != nil {
-    fmt.Println("User ID:", record["id"])
-}
+// Auth data is automatically stored in client.AuthStore
+fmt.Printf("Is valid: %v\n", client.AuthStore.IsValid())
+fmt.Printf("Token: %s\n", client.AuthStore.Token())
+
+// Access the returned data
+token, _ := authData["token"].(string)
+record, _ := authData["record"].(map[string]interface{})
 
 // With expand
-authData, err = pb.Collection("users").AuthWithPassword(
+authData, err := client.Collection("users").AuthWithPassword(
     "user@example.com",
     "password123",
     "profile", // expand
@@ -519,35 +534,38 @@ authData, err = pb.Collection("users").AuthWithPassword(
 
 ```go
 // Step 1: Get OAuth2 URL (usually done in UI)
-methods, err := pb.Collection("users").ListAuthMethods("", nil, nil)
+methods, err := client.Collection("users").ListAuthMethods("", nil, nil)
 if err != nil {
     log.Fatal(err)
 }
 
 oauth2, _ := methods["oauth2"].(map[string]interface{})
 providers, _ := oauth2["providers"].([]interface{})
+
 var provider map[string]interface{}
 for _, p := range providers {
-    if pm, ok := p.(map[string]interface{}); ok {
-        if name, _ := pm["name"].(string); name == "google" {
-            provider = pm
+    if pMap, ok := p.(map[string]interface{}); ok {
+        if name, _ := pMap["name"].(string); name == "google" {
+            provider = pMap
             break
         }
     }
 }
 
 // Step 2: After redirect, exchange code for token
-authData, err := pb.Collection("users").AuthWithOAuth2Code(
+authData, err := client.Collection("users").AuthWithOAuth2Code(
     "google",                    // Provider name
     "AUTHORIZATION_CODE",        // From redirect URL
-    provider["codeVerifier"].(string), // From step 1
-    "https://yourapp.com/callback",    // Redirect URL
-    nil,                         // createData
-    nil,                         // body
-    nil,                         // query
-    nil,                         // headers
-    "",                          // expand
-    "",                          // fields
+    fmt.Sprint(provider["codeVerifier"]), // From step 1
+    "https://yourapp.com/callback", // Redirect URL
+    map[string]interface{}{      // Optional data for new accounts
+        "name": "John Doe",
+    },
+    nil, // body
+    nil, // query
+    nil, // headers
+    "",  // expand
+    "",  // fields
 )
 ```
 
@@ -555,18 +573,22 @@ authData, err := pb.Collection("users").AuthWithOAuth2Code(
 
 ```go
 // Step 1: Request OTP
-otpRequest, err := pb.Collection("users").RequestOTP("user@example.com", nil, nil, nil)
+otpRequest, err := client.Collection("users").RequestOTP("user@example.com", nil, nil, nil)
 if err != nil {
     log.Fatal(err)
 }
-otpID := otpRequest["otpId"].(string)
+otpID, _ := otpRequest["otpId"].(string)
 
 // Step 2: User enters OTP from email
 // Step 3: Authenticate with OTP
-authData, err := pb.Collection("users").AuthWithOTP(
+authData, err := client.Collection("users").AuthWithOTP(
     otpID,
     "123456", // OTP from email
-    "", "", nil, nil, nil,
+    "",       // expand
+    "",       // fields
+    nil,      // body
+    nil,      // query
+    nil,      // headers
 )
 ```
 
@@ -575,14 +597,14 @@ authData, err := pb.Collection("users").AuthWithOTP(
 Refresh the current auth token and get updated user data:
 
 ```go
-// Refresh auth (useful on page reload)
-authData, err := pb.Collection("users").AuthRefresh("", "", nil, nil, nil)
+// Refresh auth (useful on app restart)
+authData, err := client.Collection("users").AuthRefresh("", "", nil, nil, nil)
 if err != nil {
     log.Fatal(err)
 }
 
 // Check if still valid
-if pb.AuthStore.IsValid() {
+if client.AuthStore.IsValid() {
     fmt.Println("User is authenticated")
 } else {
     fmt.Println("Token expired or invalid")
@@ -593,13 +615,13 @@ if pb.AuthStore.IsValid() {
 
 ```go
 // Request verification email
-err := pb.Collection("users").RequestVerification("user@example.com", nil, nil, nil)
+err := client.Collection("users").RequestVerification("user@example.com", nil, nil, nil)
 if err != nil {
     log.Fatal(err)
 }
 
 // Confirm verification (on verification page)
-err = pb.Collection("users").ConfirmVerification("VERIFICATION_TOKEN", nil, nil, nil)
+err = client.Collection("users").ConfirmVerification("VERIFICATION_TOKEN", nil, nil, nil)
 if err != nil {
     log.Fatal(err)
 }
@@ -609,53 +631,47 @@ if err != nil {
 
 ```go
 // Request password reset email
-err := pb.Collection("users").RequestPasswordReset("user@example.com", nil, nil, nil)
+err := client.Collection("users").RequestPasswordReset("user@example.com", nil, nil, nil)
 if err != nil {
     log.Fatal(err)
 }
 
 // Confirm password reset (on reset page)
 // Note: This invalidates all previous auth tokens
-err = pb.Collection("users").ConfirmPasswordReset(
+err = client.Collection("users").ConfirmPasswordReset(
     "RESET_TOKEN",
     "newpassword123",
     "newpassword123", // Confirm
-    nil,             // body
-    nil,             // query
-    nil,             // headers
+    nil,              // body
+    nil,              // query
+    nil,              // headers
 )
-if err != nil {
-    log.Fatal(err)
-}
 ```
 
 ### Email Change
 
 ```go
 // Must be authenticated first
-_, err := pb.Collection("users").AuthWithPassword("user@example.com", "password", "", "", nil, nil, nil)
+_, err := client.Collection("users").AuthWithPassword("user@example.com", "password", "", "", nil, nil, nil)
 if err != nil {
     log.Fatal(err)
 }
 
 // Request email change
-err = pb.Collection("users").RequestEmailChange("newemail@example.com", nil, nil, nil)
+err = client.Collection("users").RequestEmailChange("newemail@example.com", nil, nil, nil)
 if err != nil {
     log.Fatal(err)
 }
 
 // Confirm email change (on confirmation page)
 // Note: This invalidates all previous auth tokens
-err = pb.Collection("users").ConfirmEmailChange(
+err = client.Collection("users").ConfirmEmailChange(
     "EMAIL_CHANGE_TOKEN",
     "currentpassword",
     nil, // body
     nil, // query
     nil, // headers
 )
-if err != nil {
-    log.Fatal(err)
-}
 ```
 
 ### Impersonate (Superuser Only)
@@ -664,26 +680,25 @@ Generate a token to authenticate as another user:
 
 ```go
 // Must be authenticated as superuser
-_, err := pb.Admins.AuthWithPassword("admin@example.com", "password", "", "", nil, nil, nil)
+_, err := client.Collection("_superusers").AuthWithPassword("admin@example.com", "password", "", "", nil, nil, nil)
 if err != nil {
     log.Fatal(err)
 }
 
 // Impersonate a user
-impersonateClient, err := pb.Collection("users").Impersonate("USER_ID", 3600, "", "", nil, nil, nil)
+impersonateClient, err := client.Collection("users").Impersonate("USER_ID", 3600, "", "", nil, nil, nil)
 if err != nil {
     log.Fatal(err)
 }
 
 // Use the impersonated client
-posts, err := impersonateClient.Collection("posts").GetFullList(200, nil)
+posts, err := impersonateClient.Collection("posts").GetFullList(500, nil)
 if err != nil {
     log.Fatal(err)
 }
 
 // Access the token
 fmt.Println("Token:", impersonateClient.AuthStore.Token())
-fmt.Println("Record:", impersonateClient.AuthStore.Record())
 ```
 
 ## Complete Examples
@@ -691,7 +706,7 @@ fmt.Println("Record:", impersonateClient.AuthStore.Record())
 ### Example 1: Blog Post Search with Filters
 
 ```go
-func searchPosts(pb *bosbase.BosBase, query, categoryID string, minViews int) ([]interface{}, error) {
+func searchPosts(client *bosbase.BosBase, query, categoryID string, minViews int) ([]interface{}, error) {
     filter := fmt.Sprintf(`title ~ "%s" || content ~ "%s"`, query, query)
     
     if categoryID != "" {
@@ -702,7 +717,7 @@ func searchPosts(pb *bosbase.BosBase, query, categoryID string, minViews int) ([
         filter += fmt.Sprintf(` && views >= %d`, minViews)
     }
     
-    result, err := pb.Collection("posts").GetList(&bosbase.CrudListOptions{
+    result, err := client.Collection("posts").GetList(&bosbase.CrudListOptions{
         Page:    1,
         PerPage: 20,
         Filter:  filter,
@@ -713,19 +728,17 @@ func searchPosts(pb *bosbase.BosBase, query, categoryID string, minViews int) ([
         return nil, err
     }
     
-    if items, ok := result["items"].([]interface{}); ok {
-        return items, nil
-    }
-    return nil, nil
+    items, _ := result["items"].([]interface{})
+    return items, nil
 }
 ```
 
 ### Example 2: User Dashboard with Related Content
 
 ```go
-func getUserDashboard(pb *bosbase.BosBase, userID string) (map[string]interface{}, error) {
+func getUserDashboard(client *bosbase.BosBase, userID string) (map[string]interface{}, error) {
     // Get user's posts
-    postsResult, err := pb.Collection("posts").GetList(&bosbase.CrudListOptions{
+    postsResult, err := client.Collection("posts").GetList(&bosbase.CrudListOptions{
         Page:    1,
         PerPage: 10,
         Filter:  fmt.Sprintf(`author = "%s"`, userID),
@@ -737,7 +750,7 @@ func getUserDashboard(pb *bosbase.BosBase, userID string) (map[string]interface{
     }
     
     // Get user's comments
-    commentsResult, err := pb.Collection("comments").GetList(&bosbase.CrudListOptions{
+    commentsResult, err := client.Collection("comments").GetList(&bosbase.CrudListOptions{
         Page:    1,
         PerPage: 10,
         Filter:  fmt.Sprintf(`user = "%s"`, userID),
@@ -748,9 +761,12 @@ func getUserDashboard(pb *bosbase.BosBase, userID string) (map[string]interface{
         return nil, err
     }
     
+    posts, _ := postsResult["items"].([]interface{})
+    comments, _ := commentsResult["items"].([]interface{})
+    
     return map[string]interface{}{
-        "posts":    postsResult["items"],
-        "comments": commentsResult["items"],
+        "posts":    posts,
+        "comments": comments,
     }, nil
 }
 ```
@@ -758,8 +774,7 @@ func getUserDashboard(pb *bosbase.BosBase, userID string) (map[string]interface{
 ### Example 3: Advanced Filtering
 
 ```go
-// Complex filter example
-result, err := pb.Collection("posts").GetList(&bosbase.CrudListOptions{
+result, err := client.Collection("posts").GetList(&bosbase.CrudListOptions{
     Page:    1,
     PerPage: 50,
     Filter: `(status = "published" || featured = true) &&
@@ -776,8 +791,8 @@ result, err := pb.Collection("posts").GetList(&bosbase.CrudListOptions{
 ### Example 4: Batch Create Posts
 
 ```go
-func createMultiplePosts(pb *bosbase.BosBase, postsData []map[string]interface{}) ([]interface{}, error) {
-    batch := pb.CreateBatch()
+func createMultiplePosts(client *bosbase.BosBase, postsData []map[string]interface{}) ([]interface{}, error) {
+    batch := client.CreateBatch()
     
     for _, postData := range postsData {
         batch.Collection("posts").Create(postData)
@@ -804,6 +819,7 @@ func createMultiplePosts(pb *bosbase.BosBase, postsData []map[string]interface{}
     for _, result := range results {
         bodies = append(bodies, result.Body)
     }
+    
     return bodies, nil
 }
 ```
@@ -811,7 +827,7 @@ func createMultiplePosts(pb *bosbase.BosBase, postsData []map[string]interface{}
 ### Example 5: Pagination Helper
 
 ```go
-func getAllRecordsPaginated(pb *bosbase.BosBase, collectionName string, options *bosbase.CrudListOptions) ([]interface{}, error) {
+func getAllRecordsPaginated(client *bosbase.BosBase, collectionName string, options *bosbase.CrudListOptions) ([]interface{}, error) {
     var allRecords []interface{}
     page := 1
     
@@ -823,7 +839,7 @@ func getAllRecordsPaginated(pb *bosbase.BosBase, collectionName string, options 
         options.PerPage = 500
         options.SkipTotal = true // Skip count for performance
         
-        result, err := pb.Collection(collectionName).GetList(options)
+        result, err := client.Collection(collectionName).GetList(options)
         if err != nil {
             return nil, err
         }
@@ -831,7 +847,8 @@ func getAllRecordsPaginated(pb *bosbase.BosBase, collectionName string, options 
         items, _ := result["items"].([]interface{})
         allRecords = append(allRecords, items...)
         
-        if len(items) < 500 {
+        perPage, _ := result["perPage"].(float64)
+        if len(items) < int(perPage) {
             break
         }
         page++
@@ -844,7 +861,7 @@ func getAllRecordsPaginated(pb *bosbase.BosBase, collectionName string, options 
 ## Error Handling
 
 ```go
-record, err := pb.Collection("posts").Create(&bosbase.CrudMutateOptions{
+record, err := client.Collection("posts").Create(&bosbase.CrudMutateOptions{
     Body: map[string]interface{}{
         "title": "My Post",
     },
@@ -853,19 +870,16 @@ if err != nil {
     if clientErr, ok := err.(*bosbase.ClientResponseError); ok {
         switch clientErr.Status {
         case 400:
-            // Validation error
             fmt.Println("Validation errors:", clientErr.Response)
         case 403:
-            // Permission denied
             fmt.Println("Access denied")
         case 404:
-            // Not found
             fmt.Println("Collection or record not found")
         default:
-            fmt.Println("Unexpected error:", err)
+            fmt.Printf("Unexpected error: %v\n", err)
         }
     } else {
-        fmt.Println("Error:", err)
+        fmt.Printf("Error: %v\n", err)
     }
 }
 ```

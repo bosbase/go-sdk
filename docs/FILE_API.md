@@ -28,21 +28,23 @@ package main
 import (
     "fmt"
     "log"
-    "github.com/your-org/bosbase-go-sdk"
+    
+    bosbase "github.com/bosbase/go-sdk"
 )
 
 func main() {
-    pb := bosbase.New("http://127.0.0.1:8090")
+    client := bosbase.New("http://127.0.0.1:8090")
+    defer client.Close()
     
     // Get a record with a file field
-    record, err := pb.Collection("posts").GetOne("RECORD_ID", nil)
+    record, err := client.Collection("posts").GetOne("RECORD_ID", nil)
     if err != nil {
         log.Fatal(err)
     }
     
     // Get the file URL
-    filename := record["image"].(string)
-    fileUrl := pb.Files.GetURL(record, filename, nil)
+    image, _ := record["image"].(string)
+    fileUrl := client.Files.GetURL(record, image, nil)
     
     fmt.Println("File URL:", fileUrl)
 }
@@ -80,36 +82,43 @@ The following thumbnail formats are supported:
 ### Using Thumbnails
 
 ```go
+record, err := client.Collection("posts").GetOne("RECORD_ID", nil)
+if err != nil {
+    log.Fatal(err)
+}
+
+image, _ := record["image"].(string)
+
 // Get thumbnail URL
-thumbUrl := pb.Files.GetURL(record, filename, &bosbase.FileURLOptions{
+thumbUrl := client.Files.GetURL(record, image, &bosbase.FileURLOptions{
     Thumb: "100x100",
 })
 
 // Different thumbnail sizes
-smallThumb := pb.Files.GetURL(record, filename, &bosbase.FileURLOptions{
+smallThumb := client.Files.GetURL(record, image, &bosbase.FileURLOptions{
     Thumb: "50x50",
 })
 
-mediumThumb := pb.Files.GetURL(record, filename, &bosbase.FileURLOptions{
+mediumThumb := client.Files.GetURL(record, image, &bosbase.FileURLOptions{
     Thumb: "200x200",
 })
 
-largeThumb := pb.Files.GetURL(record, filename, &bosbase.FileURLOptions{
+largeThumb := client.Files.GetURL(record, image, &bosbase.FileURLOptions{
     Thumb: "500x500",
 })
 
 // Fit thumbnail (no cropping)
-fitThumb := pb.Files.GetURL(record, filename, &bosbase.FileURLOptions{
+fitThumb := client.Files.GetURL(record, image, &bosbase.FileURLOptions{
     Thumb: "200x200f",
 })
 
 // Resize to specific width
-widthThumb := pb.Files.GetURL(record, filename, &bosbase.FileURLOptions{
+widthThumb := client.Files.GetURL(record, image, &bosbase.FileURLOptions{
     Thumb: "300x0",
 })
 
 // Resize to specific height
-heightThumb := pb.Files.GetURL(record, filename, &bosbase.FileURLOptions{
+heightThumb := client.Files.GetURL(record, image, &bosbase.FileURLOptions{
     Thumb: "0x200",
 })
 ```
@@ -130,71 +139,69 @@ Protected files require a special token for access, even if you're authenticated
 
 ```go
 // Must be authenticated first
-_, err := pb.Collection("users").AuthWithPassword("user@example.com", "password", "", "", nil, nil, nil)
+_, err := client.Collection("users").AuthWithPassword(
+    "user@example.com", "password123", "", "", nil, nil, nil)
 if err != nil {
     log.Fatal(err)
 }
 
 // Get file token
-token, err := pb.Files.GetToken(nil, nil, nil)
+token, err := client.Files.GetToken(nil, nil, nil)
 if err != nil {
     log.Fatal(err)
 }
-fmt.Println("Token:", token)
+
+fmt.Println("File token:", token)
 ```
 
 ### Using Protected File Token
 
 ```go
 // Get protected file URL with token
-protectedFileUrl := pb.Files.GetURL(record, filename, &bosbase.FileURLOptions{
+record, err := client.Collection("documents").GetOne("RECORD_ID", nil)
+if err != nil {
+    log.Fatal(err)
+}
+
+filename, _ := record["document"].(string)
+protectedFileUrl := client.Files.GetURL(record, filename, &bosbase.FileURLOptions{
     Token: token,
 })
 
-// Access the file using HTTP client
-resp, err := http.Get(protectedFileUrl)
-if err != nil {
-    log.Fatal(err)
-}
-defer resp.Body.Close()
-
-// Read file content
-body, err := io.ReadAll(resp.Body)
-if err != nil {
-    log.Fatal(err)
-}
+fmt.Println("Protected file URL:", protectedFileUrl)
 ```
 
 ### Protected File Example
 
 ```go
-func displayProtectedImage(pb *bosbase.BosBase, recordID string) error {
+func displayProtectedImage(client *bosbase.BosBase, recordID string) error {
     // Authenticate
-    _, err := pb.Collection("users").AuthWithPassword("user@example.com", "password", "", "", nil, nil, nil)
+    _, err := client.Collection("users").AuthWithPassword(
+        "user@example.com", "password123", "", "", nil, nil, nil)
     if err != nil {
         return err
     }
     
     // Get record
-    record, err := pb.Collection("documents").GetOne(recordID, nil)
+    record, err := client.Collection("documents").GetOne(recordID, nil)
     if err != nil {
         return err
     }
     
     // Get file token
-    token, err := pb.Files.GetToken(nil, nil, nil)
+    token, err := client.Files.GetToken(nil, nil, nil)
     if err != nil {
         return err
     }
     
     // Get protected file URL
-    filename := record["thumbnail"].(string)
-    imageUrl := pb.Files.GetURL(record, filename, &bosbase.FileURLOptions{
+    filename, _ := record["thumbnail"].(string)
+    imageUrl := client.Files.GetURL(record, filename, &bosbase.FileURLOptions{
         Token: token,
         Thumb: "300x300",
     })
     
-    fmt.Println("Image URL:", imageUrl)
+    fmt.Println("Protected image URL:", imageUrl)
     return nil
 }
 ```
@@ -211,25 +218,11 @@ Force files to download instead of being displayed in the browser.
 
 ```go
 // Force download
-downloadUrl := pb.Files.GetURL(record, filename, &bosbase.FileURLOptions{
+downloadUrl := client.Files.GetURL(record, filename, &bosbase.FileURLOptions{
     Download: true,
 })
 
-// Use in HTTP client to download
-resp, err := http.Get(downloadUrl)
-if err != nil {
-    log.Fatal(err)
-}
-defer resp.Body.Close()
-
-// Save to file
-out, err := os.Create("downloaded_file.pdf")
-if err != nil {
-    log.Fatal(err)
-}
-defer out.Close()
-
-io.Copy(out, resp.Body)
+fmt.Println("Download URL:", downloadUrl)
 ```
 
 ## Complete Examples
@@ -237,16 +230,18 @@ io.Copy(out, resp.Body)
 ### Example 1: Image Gallery
 
 ```go
-func displayImageGallery(pb *bosbase.BosBase, recordID string) error {
-    record, err := pb.Collection("posts").GetOne(recordID, nil)
+func displayImageGallery(client *bosbase.BosBase, recordID string) error {
+    record, err := client.Collection("posts").GetOne(recordID, nil)
     if err != nil {
         return err
     }
     
     var images []string
-    if img, ok := record["images"].([]interface{}); ok {
-        for _, i := range img {
-            images = append(images, i.(string))
+    if imgList, ok := record["images"].([]interface{}); ok {
+        for _, img := range imgList {
+            if imgStr, ok := img.(string); ok {
+                images = append(images, imgStr)
+            }
         }
     } else if img, ok := record["image"].(string); ok {
         images = []string{img}
@@ -254,15 +249,15 @@ func displayImageGallery(pb *bosbase.BosBase, recordID string) error {
     
     for _, filename := range images {
         // Thumbnail for gallery
-        thumbUrl := pb.Files.GetURL(record, filename, &bosbase.FileURLOptions{
+        thumbUrl := client.Files.GetURL(record, filename, &bosbase.FileURLOptions{
             Thumb: "200x200",
         })
         
         // Full image URL
-        fullUrl := pb.Files.GetURL(record, filename, nil)
+        fullUrl := client.Files.GetURL(record, filename, nil)
         
         fmt.Printf("Thumbnail: %s\n", thumbUrl)
-        fmt.Printf("Full: %s\n", fullUrl)
+        fmt.Printf("Full image: %s\n", fullUrl)
     }
     
     return nil
@@ -272,67 +267,53 @@ func displayImageGallery(pb *bosbase.BosBase, recordID string) error {
 ### Example 2: File Download Handler
 
 ```go
-func downloadFile(pb *bosbase.BosBase, recordID, filename string) error {
-    record, err := pb.Collection("documents").GetOne(recordID, nil)
+func downloadFile(client *bosbase.BosBase, recordID, filename string) (string, error) {
+    record, err := client.Collection("documents").GetOne(recordID, nil)
     if err != nil {
-        return err
+        return "", err
     }
     
     // Get download URL
-    downloadUrl := pb.Files.GetURL(record, filename, &bosbase.FileURLOptions{
+    downloadUrl := client.Files.GetURL(record, filename, &bosbase.FileURLOptions{
         Download: true,
     })
     
-    // Download file
-    resp, err := http.Get(downloadUrl)
-    if err != nil {
-        return err
-    }
-    defer resp.Body.Close()
-    
-    // Save to local file
-    out, err := os.Create(filename)
-    if err != nil {
-        return err
-    }
-    defer out.Close()
-    
-    _, err = io.Copy(out, resp.Body)
-    return err
+    return downloadUrl, nil
 }
 ```
 
 ### Example 3: Protected File Viewer
 
 ```go
-func viewProtectedFile(pb *bosbase.BosBase, recordID string) error {
+func viewProtectedFile(client *bosbase.BosBase, recordID string) error {
     // Authenticate
-    if !pb.AuthStore.IsValid() {
-        _, err := pb.Collection("users").AuthWithPassword("user@example.com", "password", "", "", nil, nil, nil)
+    if !client.AuthStore.IsValid() {
+        _, err := client.Collection("users").AuthWithPassword(
+            "user@example.com", "password123", "", "", nil, nil, nil)
         if err != nil {
             return err
         }
     }
     
     // Get record
-    record, err := pb.Collection("private_docs").GetOne(recordID, nil)
+    record, err := client.Collection("private_docs").GetOne(recordID, nil)
     if err != nil {
         return err
     }
     
     // Get token
-    token, err := pb.Files.GetToken(nil, nil, nil)
+    token, err := client.Files.GetToken(nil, nil, nil)
     if err != nil {
-        return fmt.Errorf("failed to get file token: %v", err)
+        return err
     }
     
     // Get file URL
-    filename := record["file"].(string)
-    fileUrl := pb.Files.GetURL(record, filename, &bosbase.FileURLOptions{
+    filename, _ := record["file"].(string)
+    fileUrl := client.Files.GetURL(record, filename, &bosbase.FileURLOptions{
         Token: token,
     })
     
-    fmt.Println("File URL:", fileUrl)
+    fmt.Println("Protected file URL:", fileUrl)
     return nil
 }
 ```
@@ -340,31 +321,20 @@ func viewProtectedFile(pb *bosbase.BosBase, recordID string) error {
 ## Error Handling
 
 ```go
-fileUrl := pb.Files.GetURL(record, filename, nil)
-
-// Verify URL is valid
-if fileUrl == "" {
-    log.Fatal("Invalid file URL")
+func safeGetFileURL(client *bosbase.BosBase, record map[string]interface{}, filename string) (string, error) {
+    fileUrl := client.Files.GetURL(record, filename, nil)
+    
+    if fileUrl == "" {
+        return "", fmt.Errorf("invalid file URL")
+    }
+    
+    return fileUrl, nil
 }
 
-// Load file using HTTP client
-resp, err := http.Get(fileUrl)
-if err != nil {
-    log.Fatal("Failed to load file:", err)
-}
-defer resp.Body.Close()
-
-if resp.StatusCode != http.StatusOK {
-    log.Fatal("File access error:", resp.StatusCode)
-}
-```
-
-### Protected File Token Error Handling
-
-```go
-func getProtectedFileUrl(pb *bosbase.BosBase, record map[string]interface{}, filename string) (string, error) {
+// Protected file token error handling
+func getProtectedFileUrl(client *bosbase.BosBase, record map[string]interface{}, filename string) (string, error) {
     // Get token
-    token, err := pb.Files.GetToken(nil, nil, nil)
+    token, err := client.Files.GetToken(nil, nil, nil)
     if err != nil {
         if clientErr, ok := err.(*bosbase.ClientResponseError); ok {
             switch clientErr.Status {
@@ -380,7 +350,7 @@ func getProtectedFileUrl(pb *bosbase.BosBase, record map[string]interface{}, fil
     }
     
     // Get file URL
-    return pb.Files.GetURL(record, filename, &bosbase.FileURLOptions{
+    return client.Files.GetURL(record, filename, &bosbase.FileURLOptions{
         Token: token,
     }), nil
 }
@@ -389,13 +359,12 @@ func getProtectedFileUrl(pb *bosbase.BosBase, record map[string]interface{}, fil
 ## Best Practices
 
 1. **Use Thumbnails for Lists**: Use thumbnails when displaying images in lists/grids to reduce bandwidth
-2. **Lazy Loading**: Implement lazy loading for images below the fold
-3. **Cache Tokens**: Store file tokens and reuse them until they expire
-4. **Error Handling**: Always handle file loading errors gracefully
-5. **Content-Type**: Let the server handle content-type detection automatically
-6. **Range Requests**: The API supports Range requests for efficient video/audio streaming
-7. **Caching**: Files are cached with a 30-day cache-control header
-8. **Security**: Always use tokens for protected files, never expose them in client-side code
+2. **Cache Tokens**: Store file tokens and reuse them until they expire
+3. **Error Handling**: Always handle file loading errors gracefully
+4. **Content-Type**: Let the server handle content-type detection automatically
+5. **Range Requests**: The API supports Range requests for efficient video/audio streaming
+6. **Caching**: Files are cached with a 30-day cache-control header
+7. **Security**: Always use tokens for protected files, never expose them in client-side code
 
 ## Thumbnail Size Guidelines
 

@@ -370,6 +370,82 @@ func (s *RecordService) AuthWithOTP(otpID, password, expand, fields string, body
     return map[string]interface{}{}, nil
 }
 
+// BindCustomToken binds a custom token to an auth record after verifying the email and password.
+func (s *RecordService) BindCustomToken(email, password, token string, body map[string]interface{}, query map[string]interface{}, headers map[string]string) error {
+    payload := cloneQuery(body)
+    if payload == nil {
+        payload = map[string]interface{}{}
+    }
+    payload["email"] = email
+    payload["password"] = password
+    payload["token"] = token
+    _, err := s.client.Send(s.baseCollectionPath()+"/bind-token", &RequestOptions{Method: http.MethodPost, Body: payload, Query: query, Headers: headers})
+    return err
+}
+
+// UnbindCustomToken removes a previously bound custom token after verifying the email and password.
+func (s *RecordService) UnbindCustomToken(email, password, token string, body map[string]interface{}, query map[string]interface{}, headers map[string]string) error {
+    payload := cloneQuery(body)
+    if payload == nil {
+        payload = map[string]interface{}{}
+    }
+    payload["email"] = email
+    payload["password"] = password
+    payload["token"] = token
+    _, err := s.client.Send(s.baseCollectionPath()+"/unbind-token", &RequestOptions{Method: http.MethodPost, Body: payload, Query: query, Headers: headers})
+    return err
+}
+
+// AuthWithToken authenticates an auth collection record using a previously bound custom token.
+// On success, this method also automatically updates the client's AuthStore data.
+func (s *RecordService) AuthWithToken(token, expand, fields string, body map[string]interface{}, query map[string]interface{}, headers map[string]string) (map[string]interface{}, error) {
+    payload := cloneQuery(body)
+    if payload == nil {
+        payload = map[string]interface{}{}
+    }
+    payload["token"] = token
+    params := cloneQuery(query)
+    if expand != "" {
+        params["expand"] = expand
+    }
+    if fields != "" {
+        params["fields"] = fields
+    }
+    data, err := s.client.Send(s.baseCollectionPath()+"/auth-with-token", &RequestOptions{Method: http.MethodPost, Body: payload, Query: params, Headers: headers})
+    if err != nil {
+        return nil, err
+    }
+    if m, ok := data.(map[string]interface{}); ok {
+        return s.authResponse(m), nil
+    }
+    return map[string]interface{}{}, nil
+}
+
+// ListExternalAuths lists all linked external auth providers for the specified auth record.
+func (s *RecordService) ListExternalAuths(recordID string, query map[string]interface{}, headers map[string]string) ([]map[string]interface{}, error) {
+    filter := s.client.Filter("recordRef = {:id}", map[string]interface{}{"id": recordID})
+    params := cloneQuery(query)
+    if params == nil {
+        params = map[string]interface{}{}
+    }
+    params["filter"] = filter
+    data, err := s.client.Collection("_externalAuths").GetFullList(500, &CrudListOptions{
+        Filter:  filter,
+        Query:   params,
+        Headers: headers,
+    })
+    if err != nil {
+        return nil, err
+    }
+    result := make([]map[string]interface{}, 0, len(data))
+    for _, item := range data {
+        if m, ok := item.(map[string]interface{}); ok {
+            result = append(result, m)
+        }
+    }
+    return result, nil
+}
+
 func (s *RecordService) Impersonate(recordID string, duration int, expand, fields string, body map[string]interface{}, query map[string]interface{}, headers map[string]string) (*BosBase, error) {
     payload := cloneQuery(body)
     if payload == nil {

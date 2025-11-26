@@ -6,7 +6,7 @@ Authentication in BosBase is stateless and token-based. A client is considered a
 
 **Key Points:**
 - **No sessions**: BosBase APIs are fully stateless (tokens are not stored in the database)
-- **No logout endpoint**: To "logout", simply clear the token from your local state (`pb.AuthStore.Clear()`)
+- **No logout endpoint**: To "logout", simply clear the token from your local state (`client.AuthStore.Clear()`)
 - **Token generation**: Auth tokens are generated through auth collection Web APIs or programmatically
 - **Admin users**: `_superusers` collection works like regular auth collections but with full access (API rules are ignored)
 - **OAuth2 limitation**: OAuth2 is not supported for `_superusers` collection
@@ -29,19 +29,21 @@ package main
 
 import (
     "fmt"
-    "github.com/your-org/bosbase-go-sdk"
+    
+    bosbase "github.com/bosbase/go-sdk"
 )
 
 func main() {
-    pb := bosbase.New("http://localhost:8090")
+    client := bosbase.New("http://localhost:8090")
+    defer client.Close()
     
     // Check authentication status
-    fmt.Println("Is Valid:", pb.AuthStore.IsValid())
-    fmt.Println("Token:", pb.AuthStore.Token())
-    fmt.Println("Record:", pb.AuthStore.Record())
+    fmt.Printf("Is valid: %v\n", client.AuthStore.IsValid())
+    fmt.Printf("Token: %s\n", client.AuthStore.Token())
+    fmt.Printf("Record: %v\n", client.AuthStore.Record())
     
     // Clear authentication (logout)
-    pb.AuthStore.Clear()
+    client.AuthStore.Clear()
 }
 ```
 
@@ -59,14 +61,16 @@ package main
 import (
     "fmt"
     "log"
-    "github.com/your-org/bosbase-go-sdk"
+    
+    bosbase "github.com/bosbase/go-sdk"
 )
 
 func main() {
-    pb := bosbase.New("http://localhost:8090")
+    client := bosbase.New("http://localhost:8090")
+    defer client.Close()
     
     // Authenticate with email and password
-    authData, err := pb.Collection("users").AuthWithPassword(
+    authData, err := client.Collection("users").AuthWithPassword(
         "test@example.com",
         "password123",
         "", // expand
@@ -79,47 +83,45 @@ func main() {
         log.Fatal(err)
     }
     
-    // Auth data is automatically stored in pb.AuthStore
-    fmt.Println("Is Valid:", pb.AuthStore.IsValid())
-    fmt.Println("Token:", pb.AuthStore.Token())
-    if record := pb.AuthStore.Record(); record != nil {
-        fmt.Println("User ID:", record["id"])
-    }
+    // Auth data is automatically stored in client.AuthStore
+    fmt.Printf("Is valid: %v\n", client.AuthStore.IsValid())
+    fmt.Printf("Token: %s\n", client.AuthStore.Token())
+    
+    record, _ := authData["record"].(map[string]interface{})
+    recordID, _ := record["id"].(string)
+    fmt.Printf("User record ID: %s\n", recordID)
 }
 ```
 
 ### Response Format
 
 ```go
-// authData is a map[string]interface{} containing:
-// {
-//   "token": "eyJhbGciOiJIUzI1NiJ9...",
-//   "record": {
-//     "id": "record_id",
-//     "email": "test@example.com",
-//     // ... other user fields
-//   }
-// }
+{
+    "token": "eyJhbGciOiJIUzI1NiJ9...",
+    "record": {
+        "id": "record_id",
+        "email": "test@example.com",
+        // ... other user fields
+    }
+}
 ```
 
 ### Error Handling with MFA
 
 ```go
-authData, err := pb.Collection("users").AuthWithPassword(
-    "test@example.com",
-    "pass123",
-    "", "", nil, nil, nil,
-)
+authData, err := client.Collection("users").AuthWithPassword(
+    "test@example.com", "pass123", "", "", nil, nil, nil)
 if err != nil {
     if clientErr, ok := err.(*bosbase.ClientResponseError); ok {
         if resp, ok := clientErr.Response.(map[string]interface{}); ok {
             if mfaID, ok := resp["mfaId"].(string); ok {
                 // Handle MFA flow (see Multi-factor Authentication section)
-                handleMFA(mfaID)
+                fmt.Printf("MFA required: %s\n", mfaID)
             }
         }
+    } else {
+        log.Printf("Authentication failed: %v\n", err)
     }
-    log.Fatal(err)
 }
 ```
 
@@ -135,41 +137,34 @@ One-time password authentication via email.
 
 ```go
 // Send OTP to user's email
-result, err := pb.Collection("users").RequestOTP(
-    "test@example.com",
-    nil, // body
-    nil, // query
-    nil, // headers
-)
+result, err := client.Collection("users").RequestOTP("test@example.com", nil, nil, nil)
 if err != nil {
     log.Fatal(err)
 }
-otpID := result["otpId"].(string)
-fmt.Println("OTP ID:", otpID)
+otpID, _ := result["otpId"].(string)
+fmt.Printf("OTP ID: %s\n", otpID)
 ```
 
 ### Authenticate with OTP
 
 ```go
 // Step 1: Request OTP
-result, err := pb.Collection("users").RequestOTP("test@example.com", nil, nil, nil)
+result, err := client.Collection("users").RequestOTP("test@example.com", nil, nil, nil)
 if err != nil {
     log.Fatal(err)
 }
-otpID := result["otpId"].(string)
+otpID, _ := result["otpId"].(string)
 
 // Step 2: User enters OTP from email
-otpCode := "123456" // OTP code from email
-
 // Step 3: Authenticate with OTP
-authData, err := pb.Collection("users").AuthWithOTP(
+authData, err := client.Collection("users").AuthWithOTP(
     otpID,
-    otpCode,
-    "", // expand
-    "", // fields
-    nil, // body
-    nil, // query
-    nil, // headers
+    "123456", // OTP code from email
+    "",       // expand
+    "",       // fields
+    nil,      // body
+    nil,      // query
+    nil,      // headers
 )
 if err != nil {
     log.Fatal(err)
@@ -184,33 +179,29 @@ if err != nil {
 
 ```go
 // Get auth methods
-methods, err := pb.Collection("users").ListAuthMethods("", nil, nil)
+authMethods, err := client.Collection("users").ListAuthMethods("", nil, nil)
 if err != nil {
     log.Fatal(err)
 }
 
-// Find provider
-oauth2, _ := methods["oauth2"].(map[string]interface{})
+oauth2, _ := authMethods["oauth2"].(map[string]interface{})
 providers, _ := oauth2["providers"].([]interface{})
+
 var provider map[string]interface{}
 for _, p := range providers {
-    if pm, ok := p.(map[string]interface{}); ok {
-        if name, _ := pm["name"].(string); name == "google" {
-            provider = pm
+    if pMap, ok := p.(map[string]interface{}); ok {
+        if name, _ := pMap["name"].(string); name == "google" {
+            provider = pMap
             break
         }
     }
 }
 
 // Exchange code for token (after OAuth2 redirect)
-code := "AUTHORIZATION_CODE"
-codeVerifier := provider["codeVerifier"].(string)
-redirectURL := "https://yourapp.com/callback"
-
-authData, err := pb.Collection("users").AuthWithOAuth2Code(
-    "google",
+authData, err := client.Collection("users").AuthWithOAuth2Code(
+    provider["name"].(string),
     code,
-    codeVerifier,
+    fmt.Sprint(provider["codeVerifier"]),
     redirectURL,
     nil, // createData
     nil, // body
@@ -219,9 +210,6 @@ authData, err := pb.Collection("users").AuthWithOAuth2Code(
     "",  // expand
     "",  // fields
 )
-if err != nil {
-    log.Fatal(err)
-}
 ```
 
 ## Multi-Factor Authentication (MFA)
@@ -232,11 +220,8 @@ Requires 2 different auth methods.
 var mfaID string
 
 // First auth method (password)
-_, err := pb.Collection("users").AuthWithPassword(
-    "test@example.com",
-    "pass123",
-    "", "", nil, nil, nil,
-)
+_, err := client.Collection("users").AuthWithPassword(
+    "test@example.com", "pass123", "", "", nil, nil, nil)
 if err != nil {
     if clientErr, ok := err.(*bosbase.ClientResponseError); ok {
         if resp, ok := clientErr.Response.(map[string]interface{}); ok {
@@ -244,18 +229,22 @@ if err != nil {
                 mfaID = id
                 
                 // Second auth method (OTP)
-                otpResult, err := pb.Collection("users").RequestOTP("test@example.com", nil, nil, nil)
+                otpResult, err := client.Collection("users").RequestOTP("test@example.com", nil, nil, nil)
                 if err != nil {
                     log.Fatal(err)
                 }
-                otpID := otpResult["otpId"].(string)
+                otpID, _ := otpResult["otpId"].(string)
                 
-                // Authenticate with OTP and MFA ID
-                body := map[string]interface{}{"mfaId": mfaID}
-                _, err = pb.Collection("users").AuthWithOTP(
+                authData, err := client.Collection("users").AuthWithOTP(
                     otpID,
                     "123456",
-                    "", "", body, nil, nil,
+                    "", // expand
+                    "", // fields
+                    map[string]interface{}{
+                        "mfaId": mfaID,
+                    }, // body
+                    nil, // query
+                    nil, // headers
                 )
                 if err != nil {
                     log.Fatal(err)
@@ -274,15 +263,16 @@ Superusers can impersonate other users.
 
 ```go
 // Authenticate as superuser
-_, err := pb.Admins.AuthWithPassword("admin@example.com", "adminpass", "", "", nil, nil, nil)
+_, err := client.Collection("_superusers").AuthWithPassword(
+    "admin@example.com", "adminpass", "", "", nil, nil, nil)
 if err != nil {
     log.Fatal(err)
 }
 
 // Impersonate a user
-impersonateClient, err := pb.Collection("users").Impersonate(
+impersonateClient, err := client.Collection("users").Impersonate(
     "USER_RECORD_ID",
-    3600, // token duration in seconds
+    3600, // Optional: token duration in seconds
     "",   // expand
     "",   // fields
     nil,  // body
@@ -294,7 +284,7 @@ if err != nil {
 }
 
 // Use impersonate client
-data, err := impersonateClient.Collection("posts").GetFullList(nil, nil, nil)
+data, err := impersonateClient.Collection("posts").GetFullList(500, nil)
 if err != nil {
     log.Fatal(err)
 }
@@ -307,10 +297,10 @@ Verify token by calling `AuthRefresh()`.
 **Backend Endpoint:** `POST /api/collections/{collection}/auth-refresh`
 
 ```go
-authData, err := pb.Collection("users").AuthRefresh("", "", nil, nil, nil)
+authData, err := client.Collection("users").AuthRefresh("", "", nil, nil, nil)
 if err != nil {
-    fmt.Println("Token verification failed:", err)
-    pb.AuthStore.Clear()
+    log.Printf("Token verification failed: %v\n", err)
+    client.AuthStore.Clear()
 } else {
     fmt.Println("Token is valid")
 }
@@ -321,18 +311,18 @@ if err != nil {
 **Backend Endpoint:** `GET /api/collections/{collection}/auth-methods`
 
 ```go
-methods, err := pb.Collection("users").ListAuthMethods("", nil, nil)
+authMethods, err := client.Collection("users").ListAuthMethods("", nil, nil)
 if err != nil {
     log.Fatal(err)
 }
 
-password, _ := methods["password"].(map[string]interface{})
-oauth2, _ := methods["oauth2"].(map[string]interface{})
-mfa, _ := methods["mfa"].(map[string]interface{})
+password, _ := authMethods["password"].(map[string]interface{})
+oauth2, _ := authMethods["oauth2"].(map[string]interface{})
+mfa, _ := authMethods["mfa"].(map[string]interface{})
 
-fmt.Println("Password enabled:", password["enabled"])
-fmt.Println("OAuth2 enabled:", oauth2["enabled"])
-fmt.Println("MFA enabled:", mfa["enabled"])
+fmt.Printf("Password enabled: %v\n", password["enabled"])
+fmt.Printf("OAuth2 enabled: %v\n", oauth2["enabled"])
+fmt.Printf("MFA enabled: %v\n", mfa["enabled"])
 ```
 
 ## Complete Examples
@@ -345,53 +335,75 @@ package main
 import (
     "fmt"
     "log"
-    "github.com/your-org/bosbase-go-sdk"
+    
+    bosbase "github.com/bosbase/go-sdk"
 )
 
-func authenticateUser(pb *bosbase.BosBase, email, password string) (map[string]interface{}, error) {
+func authenticateUser(client *bosbase.BosBase, email, password string) (map[string]interface{}, error) {
     // Try password authentication
-    authData, err := pb.Collection("users").AuthWithPassword(
-        email, password, "", "", nil, nil, nil,
-    )
+    authData, err := client.Collection("users").AuthWithPassword(
+        email, password, "", "", nil, nil, nil)
     if err != nil {
         // Check if MFA is required
         if clientErr, ok := err.(*bosbase.ClientResponseError); ok {
-            if clientErr.Status == 401 {
-                if resp, ok := clientErr.Response.(map[string]interface{}); ok {
-                    if mfaID, ok := resp["mfaId"].(string); ok {
-                        fmt.Println("MFA required, proceeding with second factor...")
-                        return handleMFA(pb, email, mfaID)
-                    }
+            if resp, ok := clientErr.Response.(map[string]interface{}); ok {
+                if mfaID, ok := resp["mfaId"].(string); ok {
+                    fmt.Println("MFA required, proceeding with second factor...")
+                    return handleMFA(client, email, mfaID)
                 }
+            }
+        }
+        
+        // Handle other errors
+        if clientErr, ok := err.(*bosbase.ClientResponseError); ok {
+            switch clientErr.Status {
+            case 400:
+                return nil, fmt.Errorf("invalid credentials")
+            case 403:
+                return nil, fmt.Errorf("password authentication is not enabled for this collection")
+            default:
+                return nil, err
             }
         }
         return nil, err
     }
     
-    fmt.Println("Successfully authenticated:", email)
+    fmt.Printf("Successfully authenticated: %v\n", email)
     return authData, nil
 }
 
-func handleMFA(pb *bosbase.BosBase, email, mfaID string) (map[string]interface{}, error) {
+func handleMFA(client *bosbase.BosBase, email, mfaID string) (map[string]interface{}, error) {
     // Request OTP for second factor
-    otpResult, err := pb.Collection("users").RequestOTP(email, nil, nil, nil)
+    otpResult, err := client.Collection("users").RequestOTP(email, nil, nil, nil)
     if err != nil {
         return nil, err
     }
-    otpID := otpResult["otpId"].(string)
     
-    // In a real app, get OTP from user input
-    userEnteredOTP := getUserOTPInput() // Your function to get user input
+    otpID, _ := otpResult["otpId"].(string)
+    
+    // In a real app, show a modal/form for the user to enter OTP
+    // For this example, we'll simulate getting the OTP
+    userEnteredOTP := getUserOTPInput() // Your UI function
     
     // Authenticate with OTP and MFA ID
-    body := map[string]interface{}{"mfaId": mfaID}
-    authData, err := pb.Collection("users").AuthWithOTP(
+    authData, err := client.Collection("users").AuthWithOTP(
         otpID,
         userEnteredOTP,
-        "", "", body, nil, nil,
+        "", // expand
+        "", // fields
+        map[string]interface{}{
+            "mfaId": mfaID,
+        }, // body
+        nil, // query
+        nil, // headers
     )
     if err != nil {
-        return nil, fmt.Errorf("MFA authentication failed: %v", err)
+        if clientErr, ok := err.(*bosbase.ClientResponseError); ok {
+            if clientErr.Status == 429 {
+                return nil, fmt.Errorf("too many OTP attempts, please request a new OTP")
+            }
+        }
+        return nil, fmt.Errorf("invalid OTP code")
     }
     
     fmt.Println("MFA authentication successful")
@@ -399,19 +411,20 @@ func handleMFA(pb *bosbase.BosBase, email, mfaID string) (map[string]interface{}
 }
 
 func getUserOTPInput() string {
-    // In a real app, this would get input from user
+    // In a real app, this would get input from the user
     return "123456"
 }
 
 func main() {
-    pb := bosbase.New("http://localhost:8090")
+    client := bosbase.New("http://localhost:8090")
+    defer client.Close()
     
-    authData, err := authenticateUser(pb, "user@example.com", "password123")
+    authData, err := authenticateUser(client, "user@example.com", "password123")
     if err != nil {
-        log.Fatal("Authentication failed:", err)
+        log.Fatal(err)
     }
     
-    fmt.Println("User is authenticated:", pb.AuthStore.Record())
+    fmt.Printf("User is authenticated: %v\n", client.AuthStore.Record())
 }
 ```
 
@@ -424,60 +437,67 @@ import (
     "fmt"
     "log"
     "time"
-    "github.com/your-org/bosbase-go-sdk"
+    
+    bosbase "github.com/bosbase/go-sdk"
 )
 
-func checkAuth(pb *bosbase.BosBase) bool {
-    if pb.AuthStore.IsValid() {
-        record := pb.AuthStore.Record()
-        if record != nil {
-            fmt.Println("User is authenticated:", record["email"])
-        }
+// Check if user is already authenticated
+func checkAuth(client *bosbase.BosBase) (bool, error) {
+    if client.AuthStore.IsValid() {
+        fmt.Printf("User is authenticated: %v\n", client.AuthStore.Record())
         
         // Verify token is still valid and refresh if needed
-        _, err := pb.Collection("users").AuthRefresh("", "", nil, nil, nil)
+        _, err := client.Collection("users").AuthRefresh("", "", nil, nil, nil)
         if err != nil {
             fmt.Println("Token expired or invalid, clearing auth")
-            pb.AuthStore.Clear()
-            return false
+            client.AuthStore.Clear()
+            return false, nil
         }
+        
         fmt.Println("Token refreshed successfully")
-        return true
+        return true, nil
     }
-    return false
+    return false, nil
 }
 
-func setupAutoRefresh(pb *bosbase.BosBase) {
-    if !pb.AuthStore.IsValid() {
+// Auto-refresh token before expiration
+func setupAutoRefresh(client *bosbase.BosBase) {
+    if !client.AuthStore.IsValid() {
         return
     }
     
-    // In a real app, you would parse the JWT token to get expiration time
-    // For now, we'll just refresh periodically
-    ticker := time.NewTicker(30 * time.Minute)
+    // In a real app, you would parse the JWT token to get expiration
+    // For this example, we'll refresh every 5 minutes
+    ticker := time.NewTicker(5 * time.Minute)
     go func() {
         for range ticker.C {
-            if pb.AuthStore.IsValid() {
-                _, err := pb.Collection("users").AuthRefresh("", "", nil, nil, nil)
-                if err != nil {
-                    fmt.Println("Auto-refresh failed:", err)
-                    pb.AuthStore.Clear()
-                    ticker.Stop()
-                } else {
-                    fmt.Println("Token auto-refreshed")
-                }
-            } else {
+            _, err := client.Collection("users").AuthRefresh("", "", nil, nil, nil)
+            if err != nil {
+                fmt.Printf("Auto-refresh failed: %v\n", err)
+                client.AuthStore.Clear()
                 ticker.Stop()
+            } else {
+                fmt.Println("Token auto-refreshed")
             }
         }
     }()
 }
 
 func main() {
-    pb := bosbase.New("http://localhost:8090")
+    client := bosbase.New("http://localhost:8090")
+    defer client.Close()
     
-    if checkAuth(pb) {
-        setupAutoRefresh(pb)
+    isAuthenticated, err := checkAuth(client)
+    if err != nil {
+        log.Fatal(err)
+    }
+    
+    if !isAuthenticated {
+        fmt.Println("Not authenticated, redirect to login")
+    } else {
+        setupAutoRefresh(client)
+        // Keep the program running
+        select {}
     }
 }
 ```
@@ -490,45 +510,63 @@ package main
 import (
     "fmt"
     "log"
-    "github.com/your-org/bosbase-go-sdk"
+    
+    bosbase "github.com/bosbase/go-sdk"
 )
 
-func impersonateUserForSupport(pb *bosbase.BosBase, userID string) error {
+func impersonateUserForSupport(client *bosbase.BosBase, userID string) (map[string]interface{}, error) {
     // Authenticate as admin
-    _, err := pb.Admins.AuthWithPassword("admin@example.com", "adminpassword", "", "", nil, nil, nil)
+    _, err := client.Collection("_superusers").AuthWithPassword(
+        "admin@example.com", "adminpassword", "", "", nil, nil, nil)
     if err != nil {
-        return err
+        return nil, err
     }
     
     // Impersonate the user (1 hour token)
-    userClient, err := pb.Collection("users").Impersonate(userID, 3600, "", "", nil, nil, nil)
+    userClient, err := client.Collection("users").Impersonate(userID, 3600, "", "", nil, nil, nil)
     if err != nil {
-        return err
+        return nil, err
     }
     
     record := userClient.AuthStore.Record()
-    if record != nil {
-        fmt.Println("Impersonating user:", record["email"])
-    }
+    email, _ := record["email"].(string)
+    fmt.Printf("Impersonating user: %s\n", email)
     
     // Use the impersonated client to test user experience
-    userRecords, err := userClient.Collection("posts").GetFullList(nil, nil, nil)
+    userRecords, err := userClient.Collection("posts").GetFullList(500, nil)
     if err != nil {
-        return err
+        return nil, err
     }
-    
     fmt.Printf("User can see %d posts\n", len(userRecords))
     
-    return nil
+    // Check what the user sees
+    userView, err := userClient.Collection("posts").GetList(&bosbase.CrudListOptions{
+        Page:    1,
+        PerPage: 10,
+        Filter:  `published = true`,
+    })
+    if err != nil {
+        return nil, err
+    }
+    
+    items, _ := userView["items"].([]interface{})
+    
+    return map[string]interface{}{
+        "canAccess":  len(items),
+        "totalPosts": len(userRecords),
+    }, nil
 }
 
 func main() {
-    pb := bosbase.New("http://localhost:8090")
+    client := bosbase.New("http://localhost:8090")
+    defer client.Close()
     
-    err := impersonateUserForSupport(pb, "user_record_id")
+    result, err := impersonateUserForSupport(client, "user_record_id")
     if err != nil {
-        log.Fatal("Impersonation failed:", err)
+        log.Fatal(err)
     }
+    
+    fmt.Printf("User access check: %v\n", result)
 }
 ```
 
@@ -546,27 +584,34 @@ func main() {
 ## Troubleshooting
 
 ### Token Expired
+
 If you get 401 errors, check if the token has expired:
+
 ```go
-_, err := pb.Collection("users").AuthRefresh("", "", nil, nil, nil)
+_, err := client.Collection("users").AuthRefresh("", "", nil, nil, nil)
 if err != nil {
     // Token expired, require re-authentication
-    pb.AuthStore.Clear()
+    client.AuthStore.Clear()
     // Redirect to login
 }
 ```
 
 ### MFA Required
+
 If authentication returns 401 with mfaId:
+
 ```go
 if clientErr, ok := err.(*bosbase.ClientResponseError); ok {
-    if clientErr.Status == 401 {
-        if resp, ok := clientErr.Response.(map[string]interface{}); ok {
-            if mfaID, ok := resp["mfaId"].(string); ok {
-                // Proceed with second authentication factor
-            }
+    if resp, ok := clientErr.Response.(map[string]interface{}); ok {
+        if mfaID, ok := resp["mfaId"].(string); ok {
+            // Proceed with second authentication factor
         }
     }
 }
 ```
+
+## Related Documentation
+
+- [Collections](./COLLECTIONS.md)
+- [API Rules](./API_RULES_AND_FILTERS.md)
 
