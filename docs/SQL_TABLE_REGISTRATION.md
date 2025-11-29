@@ -2,8 +2,8 @@
 
 Use the SQL table helpers to expose existing tables (or run SQL to create them) and automatically generate REST collections. Both calls are **superuser-only**.
 
-- `RegisterSqlTables(tables []string, ...)` – map existing tables to collections without running SQL.
-- `ImportSqlTables(tables []SqlTableDefinition, ...)` – optionally run SQL to create tables first, then register them. Returns `{ created, skipped }`.
+- `RegisterSqlTables(tables []string, query, headers)` – map existing tables to collections without running SQL.
+- `ImportSqlTables(tables []SqlTableDefinition, query, headers)` – optionally run SQL to create tables first, then register them. Returns `{ created, skipped }`.
 
 ## Requirements
 
@@ -37,7 +37,7 @@ func main() {
     
     collections, err := client.Collections.RegisterSqlTables(
         []string{"projects", "accounts"},
-        nil, nil, nil,
+        nil, nil,
     )
     if err != nil {
         log.Fatal(err)
@@ -86,7 +86,7 @@ tables := []bosbase.SqlTableDefinition{
     },
 }
 
-result, err := client.Collections.ImportSqlTables(tables, nil, nil, nil)
+result, err := client.Collections.ImportSqlTables(tables, nil, nil)
 if err != nil {
     log.Fatal(err)
 }
@@ -125,4 +125,3 @@ for _, s := range skipped {
 
 - [Collection API](./COLLECTION_API.md) - Collection management
 - [Collections](./COLLECTIONS.md) - Collection configuration
-

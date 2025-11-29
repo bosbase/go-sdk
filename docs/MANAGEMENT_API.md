@@ -12,6 +12,7 @@ This document covers the management API capabilities available in the Go SDK, wh
 - [Cron Service](#cron-service)
 - [Health Service](#health-service)
 - [Collection Service](#collection-service)
+- [SQL Service](#sql-service)
 
 ## Settings Service
 
@@ -102,6 +103,10 @@ See [Health API](./HEALTH_API.md) for detailed documentation.
 
 See [Collection API](./COLLECTION_API.md) for detailed documentation.
 
+## SQL Service
+
+Execute management SQL with [SQL API](./SQL_API.md) (superuser-only).
+
 ## Related Documentation
 
 - [Backups API](./BACKUPS_API.md) - Backup management
@@ -109,4 +114,4 @@ See [Collection API](./COLLECTION_API.md) for detailed documentation.
 - [Crons API](./CRONS_API.md) - Cron job management
 - [Health API](./HEALTH_API.md) - Health checks
 - [Collection API](./COLLECTION_API.md) - Collection management
-
+- [SQL API](./SQL_API.md) - Superuser SQL execution
