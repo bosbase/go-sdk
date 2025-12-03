@@ -39,7 +39,13 @@ func main() {
 
 ## Insert Documents
 
+> Easiest path: omit `Embedding` when inserting and let the backend embed for you—then every doc in the collection shares the same dimension automatically.
+
 ```go
+// Let the backend embed for you by omitting Embedding. This keeps
+// every document in the collection on the same dimension automatically.
+// With OPENAI_API_KEY set, BosBase will call OpenAI's text-embedding-3-small
+// under the hood and enforce that dimension across the collection.
 doc := bosbase.LLMDocument{
     Content: "Leaves are green because chlorophyll absorbs red and blue light.",
     Metadata: map[string]interface{}{
@@ -241,4 +247,3 @@ func main() {
 
 - [LangChaingo API](./LANGCHAINGO_API.md) - LangChainGo workflows
 - [Vector API](./VECTOR_API.md) - Vector embeddings
-
